@@ -1,23 +1,71 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, Bookmark, Github, Menu, Moon, Search, Sparkles, Sun, X } from "lucide-react";
-import { categories, CategoryId, sites } from "@/data/sites";
+import { ArrowRight, Bookmark, Github, Moon, Search, Sun, X } from "lucide-react";
+import { categories, CategoryId, Site, sites } from "@/data/sites";
 
 type Theme = "light" | "dark";
+type SiteCategory = Exclude<CategoryId, "all">;
+
+const categoryMeta: Record<SiteCategory, { description: string; color: string; icon: string }> = {
+  design: { description: "界面、字体、配色与设计系统参考。", color: "#8a72d8", icon: "◐" },
+  ai: { description: "对话、搜索与创作型人工智能工具。", color: "#2e9bb7", icon: "✦" },
+  dev: { description: "写代码、查文档与发布产品的工具箱。", color: "#477a68", icon: "⌁" },
+  inspiration: { description: "从视觉世界里打捞意外的好点子。", color: "#58b96a", icon: "◎" },
+  productivity: { description: "让工作更顺手，让注意力留给重要的事。", color: "#d78b36", icon: "✓" },
+  knowledge: { description: "值得阅读、订阅、标注和反复回看的内容。", color: "#e16e49", icon: "≋" },
+};
+
+function faviconSources(url: string) {
+  try {
+    const parsed = new URL(url);
+    return [
+      `${parsed.origin}/favicon.ico`,
+      `https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(url)}&sz=64`,
+    ];
+  } catch {
+    return [];
+  }
+}
+
+function Favicon({ site }: { site: Site }) {
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const sources = useMemo(() => faviconSources(site.url), [site.url]);
+
+  useEffect(() => setSourceIndex(0), [site.url]);
+
+  if (sourceIndex >= sources.length) {
+    return <span className="favicon-fallback" style={{ "--site-accent": site.accent } as React.CSSProperties}>{site.mark}</span>;
+  }
+
+  return (
+    <span className="favicon-shell">
+      {/* External favicon hosts vary by site, so a native img with a two-step fallback is intentional. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={sources[sourceIndex]}
+        alt=""
+        width="22"
+        height="22"
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setSourceIndex((index) => index + 1)}
+      />
+    </span>
+  );
+}
 
 export default function Home() {
-  const [category, setCategory] = useState<CategoryId>("all");
+  const [activeCategory, setActiveCategory] = useState<CategoryId>("all");
   const [query, setQuery] = useState("");
   const [favorites, setFavorites] = useState<string[]>([]);
   const [theme, setTheme] = useState<Theme>("light");
-  const [menuOpen, setMenuOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const stored = localStorage.getItem("atlas-favorites");
+    const storedFavorites = localStorage.getItem("atlas-favorites");
     const storedTheme = localStorage.getItem("atlas-theme") as Theme | null;
-    if (stored) setFavorites(JSON.parse(stored));
+    if (storedFavorites) setFavorites(JSON.parse(storedFavorites));
     if (storedTheme) setTheme(storedTheme);
   }, []);
 
@@ -27,7 +75,7 @@ export default function Home() {
   }, [theme]);
 
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
+    const handleKeydown = (event: KeyboardEvent) => {
       if (event.key === "/" && document.activeElement?.tagName !== "INPUT") {
         event.preventDefault();
         searchRef.current?.focus();
@@ -37,26 +85,27 @@ export default function Home() {
         searchRef.current?.blur();
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", handleKeydown);
+    return () => window.removeEventListener("keydown", handleKeydown);
   }, []);
 
-  const filteredSites = useMemo(() => {
-    const keyword = query.trim().toLowerCase();
-    return sites.filter((site) => {
-      const matchesCategory = category === "all" || site.category === category;
-      const haystack = [site.name, site.description, ...site.tags].join(" ").toLowerCase();
-      return matchesCategory && (!keyword || haystack.includes(keyword));
-    });
-  }, [category, query]);
+  const keyword = query.trim().toLowerCase();
+  const boardCategories = useMemo(() => {
+    return categories
+      .filter((category): category is typeof category & { id: SiteCategory } => category.id !== "all")
+      .filter((category) => activeCategory === "all" || category.id === activeCategory)
+      .map((category) => ({
+        ...category,
+        sites: sites.filter((site) => {
+          if (site.category !== category.id) return false;
+          if (!keyword) return true;
+          return [site.name, site.description, ...site.tags].join(" ").toLowerCase().includes(keyword);
+        }),
+      }))
+      .filter((category) => category.sites.length > 0);
+  }, [activeCategory, keyword]);
 
-  const featured = sites.filter((site) => site.featured);
-  const currentLabel = categories.find((item) => item.id === category)?.label;
-
-  const chooseCategory = (id: CategoryId) => {
-    setCategory(id);
-    setMenuOpen(false);
-  };
+  const resultCount = boardCategories.reduce((total, category) => total + category.sites.length, 0);
 
   const toggleFavorite = (id: string) => {
     setFavorites((current) => {
@@ -67,122 +116,120 @@ export default function Home() {
   };
 
   return (
-    <div className="app-shell">
-      <aside className={`sidebar ${menuOpen ? "is-open" : ""}`}>
-        <div className="brand-row">
-          <a className="brand" href="#top" aria-label="Atlas 首页">
-            <span className="brand-orbit"><span /></span>
-            <span>ATLAS</span>
-          </a>
-          <button className="icon-button mobile-only" onClick={() => setMenuOpen(false)} aria-label="关闭菜单"><X size={19} /></button>
+    <main id="top" className="board-shell">
+      <header className="topbar">
+        <a className="brand" href="#top" aria-label="Atlas 首页">
+          <span className="brand-orbit"><span /></span>
+          <span>ATLAS</span>
+        </a>
+
+        <div className="search-wrap">
+          <Search size={18} />
+          <input
+            ref={searchRef}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="搜索网站、描述或标签…"
+            aria-label="搜索收藏"
+          />
+          {query ? <button onClick={() => setQuery("")} aria-label="清空搜索"><X size={16} /></button> : <kbd>/</kbd>}
         </div>
 
-        <nav className="category-nav" aria-label="网站分类">
-          <span className="eyebrow nav-label">你的收藏夹</span>
-          {categories.map((item) => {
-            const count = item.id === "all" ? sites.length : sites.filter((site) => site.category === item.id).length;
+        <div className="top-actions">
+          <a className="icon-button" href="https://github.com/mokeyishi/atlas-nav" target="_blank" rel="noreferrer" aria-label="GitHub 仓库"><Github size={18} /></a>
+          <button className="icon-button" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label="切换主题">
+            {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
+          </button>
+        </div>
+      </header>
+
+      <div className="page-wrap">
+        <section className="intro">
+          <div>
+            <span className="eyebrow">PERSONAL INTERNET INDEX · {new Date().getFullYear()}</span>
+            <h1>我的互联网收藏</h1>
+            <p>把常用工具、灵感和知识，整齐放进一张随时可查的地图。</p>
+          </div>
+          <div className="intro-stats" aria-label="收藏统计">
+            <span><strong>{sites.length}</strong> 个网站</span>
+            <span><strong>{categories.length - 1}</strong> 个分类</span>
+            <span><strong>{favorites.length}</strong> 个星标</span>
+          </div>
+        </section>
+
+        <nav className="filter-bar" aria-label="分类筛选">
+          {categories.map((category) => {
+            const count = category.id === "all" ? sites.length : sites.filter((site) => site.category === category.id).length;
             return (
-              <button key={item.id} className={category === item.id ? "active" : ""} onClick={() => chooseCategory(item.id)}>
-                <span className="nav-glyph">{item.glyph}</span>
-                <span>{item.label}</span>
-                <span className="nav-count">{count}</span>
+              <button key={category.id} className={activeCategory === category.id ? "active" : ""} onClick={() => setActiveCategory(category.id)}>
+                <span>{category.glyph}</span>{category.label}<small>{count}</small>
               </button>
             );
           })}
         </nav>
 
-        <div className="sidebar-note">
-          <Sparkles size={17} />
-          <p><strong>保持好奇。</strong><br />互联网仍有许多好东西。</p>
-        </div>
-        <div className="sidebar-footer">24 个站点 · 6 个分类</div>
-      </aside>
-
-      {menuOpen && <button className="scrim" onClick={() => setMenuOpen(false)} aria-label="关闭菜单" />}
-
-      <main id="top" className="main-content">
-        <header className="topbar">
-          <button className="icon-button mobile-only" onClick={() => setMenuOpen(true)} aria-label="打开菜单"><Menu size={20} /></button>
-          <div className="search-wrap">
-            <Search size={18} />
-            <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索网站、描述或标签…" aria-label="搜索收藏" />
-            {query ? <button onClick={() => setQuery("")} aria-label="清空搜索"><X size={16} /></button> : <kbd>/</kbd>}
+        {(query || activeCategory !== "all") && (
+          <div className="result-row">
+            <span>{query ? `“${query}”` : categories.find((item) => item.id === activeCategory)?.label}</span>
+            <strong>{resultCount} 个结果</strong>
           </div>
-          <div className="top-actions">
-            <a className="icon-button" href="https://github.com" target="_blank" rel="noreferrer" aria-label="GitHub"><Github size={18} /></a>
-            <button className="icon-button" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label="切换主题">
-              {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
-            </button>
-          </div>
-        </header>
+        )}
 
-        <div className="content-wrap">
-          {!query && category === "all" && (
-            <>
-              <section className="hero">
-                <div>
-                  <span className="eyebrow">PERSONAL INTERNET INDEX · 2026</span>
-                  <h1>把互联网的好东西，<br /><em>放在手边。</em></h1>
-                  <p>一张为好奇心绘制的私人地图。收集工具、灵感与知识，也给偶然的发现留一点空间。</p>
-                </div>
-                <div className="hero-compass" aria-hidden="true">
-                  <span className="ring ring-one" /><span className="ring ring-two" />
-                  <span className="needle">↗</span><small>EXPLORE</small>
-                </div>
-              </section>
+        {boardCategories.length > 0 ? (
+          <section className={`category-board ${activeCategory !== "all" ? "is-filtered" : ""} ${query ? "has-search" : ""}`} aria-label="网站分类看板">
+            {boardCategories.map((category) => {
+              const meta = categoryMeta[category.id];
+              return (
+                <article
+                  id={`category-${category.id}`}
+                  className={`category-panel panel-${category.id}`}
+                  style={{ "--panel-accent": meta.color } as React.CSSProperties}
+                  key={category.id}
+                >
+                  <header className="panel-header">
+                    <div className="panel-title">
+                      <span className="panel-icon">{meta.icon}</span>
+                      <div><h2>{category.label}</h2><small>{category.sites.length.toString().padStart(2, "0")} SITES</small></div>
+                    </div>
+                    <div className="panel-rule"><span /></div>
+                    <p>{meta.description}</p>
+                  </header>
 
-              <section className="featured-section">
-                <div className="section-heading">
-                  <div><span className="eyebrow">EDITOR&apos;S SHELF</span><h2>本周精选</h2></div>
-                  <span className="muted">值得慢慢逛的 4 个地方</span>
-                </div>
-                <div className="featured-grid">
-                  {featured.map((site, index) => (
-                    <a className={`featured-card card-${index + 1}`} href={site.url} target="_blank" rel="noreferrer" key={site.id} style={{ "--accent": site.accent } as React.CSSProperties}>
-                      <div className="featured-top"><span className="site-mark">{site.mark}</span><ArrowUpRight size={18} /></div>
-                      <div><span className="card-index">0{index + 1}</span><h3>{site.name}</h3><p>{site.description}</p></div>
-                    </a>
-                  ))}
-                </div>
-              </section>
-            </>
-          )}
+                  <ol className="site-list">
+                    {category.sites.map((site, index) => {
+                      const isFavorite = favorites.includes(site.id);
+                      return (
+                        <li key={site.id}>
+                          <span className="site-rank">{index + 1}.</span>
+                          <a href={site.url} target="_blank" rel="noreferrer" title={site.description}>
+                            <Favicon site={site} />
+                            <span className="site-name">{site.name}</span>
+                            {site.tags[0] && <span className="site-tag">{site.tags[0]}</span>}
+                          </a>
+                          <button className={`mini-bookmark ${isFavorite ? "saved" : ""}`} onClick={() => toggleFavorite(site.id)} aria-label={isFavorite ? `取消收藏 ${site.name}` : `收藏 ${site.name}`}>
+                            <Bookmark size={14} fill={isFavorite ? "currentColor" : "none"} />
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ol>
 
-          <section className="library-section">
-            <div className="section-heading library-heading">
-              <div><span className="eyebrow">THE LIBRARY</span><h2>{query ? `“${query}” 的结果` : currentLabel}</h2></div>
-              <span className="result-count">{filteredSites.length.toString().padStart(2, "0")} SITES</span>
-            </div>
-
-            {filteredSites.length ? (
-              <div className="site-grid">
-                {filteredSites.map((site) => {
-                  const isFavorite = favorites.includes(site.id);
-                  return (
-                    <article className="site-card" key={site.id}>
-                      <div className="site-card-top">
-                        <a className="site-icon" href={site.url} target="_blank" rel="noreferrer" style={{ "--accent": site.accent } as React.CSSProperties}>{site.mark}</a>
-                        <button className={`bookmark-button ${isFavorite ? "saved" : ""}`} onClick={() => toggleFavorite(site.id)} aria-label={isFavorite ? "取消收藏" : "收藏网站"}>
-                          <Bookmark size={17} fill={isFavorite ? "currentColor" : "none"} />
-                        </button>
-                      </div>
-                      <a className="site-info" href={site.url} target="_blank" rel="noreferrer">
-                        <div className="site-title-row"><h3>{site.name}</h3><ArrowUpRight size={16} /></div>
-                        <p>{site.description}</p>
-                      </a>
-                      <div className="tag-row">{site.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
-                    </article>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="empty-state"><span>⌕</span><h3>这张地图上还没有标记</h3><p>换个关键词，或者去其他分类看看。</p><button onClick={() => { setQuery(""); setCategory("all"); }}>返回全部收藏</button></div>
-            )}
+                  <a className="panel-footer" href={`#category-${category.id}`} onClick={(event) => { event.preventDefault(); setActiveCategory(category.id); }}>
+                    查看全部 {category.sites.length} 个网站 <ArrowRight size={17} />
+                  </a>
+                </article>
+              );
+            })}
           </section>
+        ) : (
+          <section className="empty-state">
+            <span>⌕</span><h2>没有找到相关网站</h2><p>换个关键词，或者返回全部收藏看看。</p>
+            <button onClick={() => { setQuery(""); setActiveCategory("all"); }}>返回全部收藏</button>
+          </section>
+        )}
 
-          <footer><span>ATLAS / PERSONAL INTERNET INDEX</span><span>为好奇心留一条路 · {new Date().getFullYear()}</span></footer>
-        </div>
-      </main>
-    </div>
+        <footer className="page-footer"><span>ATLAS / PERSONAL INTERNET INDEX</span><span>图标自动读取 · 数据集中管理 · Vercel Ready</span></footer>
+      </div>
+    </main>
   );
 }
