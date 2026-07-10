@@ -1,0 +1,9 @@
+node_modules
+.npm-cache
+.next
+out
+.vercel
+*.log
+.DS_Store
+.env*
+!.env.example
